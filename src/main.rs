@@ -11,7 +11,7 @@ fn main() {
     loop {
         match udp_socket.recv_from(&mut buf) {
             Ok((size, source)) => {
-                let message = std::str::from_utf8(&buf[..size]).unwrap();
+                let message = String::from_utf8_lossy(&buf[..size]);
                 println!("Received {} bytes from {}: {}", size, source, message);
                 let response: [u8; 12] = [0x04, 0xd2, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0];
                 udp_socket
