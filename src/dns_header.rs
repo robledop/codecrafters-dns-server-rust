@@ -1,7 +1,7 @@
 #[derive(Debug, Default, Clone)]
 pub struct DnsHeader {
     // Packet ID (ID). 16 bits
-    pub  id: u16,
+    pub id: u16,
     // Query/Response indicator (QR). 1 bit
     pub qr: bool,
     // Operation code (OPCODE). 4 bits
@@ -83,5 +83,62 @@ impl DnsHeader {
         packet[10] = (self.arcount >> 8) as u8;
         packet[11] = self.arcount as u8;
         packet
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct DnsQuestion {
+    pub qname: String,
+    pub qtype: u16,
+    pub qclass: u16,
+}
+
+impl DnsQuestion {
+    pub fn new(name: String, qtype: u16, qclass: u16) -> DnsQuestion {
+        DnsQuestion {
+            qname: name,
+            qtype,
+            qclass,
+        }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for part in self.qname.split('.') {
+            bytes.push(part.len() as u8);
+            bytes.extend(part.as_bytes());
+        }
+        bytes.push(0);
+        bytes.push((self.qtype >> 8) as u8);
+        bytes.push(self.qtype as u8);
+        bytes.push((self.qclass >> 8) as u8);
+        bytes.push(self.qclass as u8);
+        bytes
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct DnsPacket {
+    pub header: DnsHeader,
+    pub questions: Vec<DnsQuestion>,
+    // pub answers: Vec<DnsRecord>,
+    // pub authorities: Vec<DnsRecord>,
+    // pub additionals: Vec<DnsRecord>,
+}
+
+impl DnsPacket {
+    pub fn new() -> DnsPacket {
+        DnsPacket {
+            header: DnsHeader::new(),
+            questions: vec![],
+        }
+    }
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend(self.header.to_bytes());
+        for question in &self.questions {
+            bytes.extend(question.to_bytes());
+        }
+        bytes
     }
 }

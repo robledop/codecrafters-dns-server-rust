@@ -1,7 +1,6 @@
 mod dns_header;
 
-use crate::dns_header::DnsHeader;
-use std::io::LineWriter;
+use crate::dns_header::{DnsHeader, DnsPacket, DnsQuestion};
 #[allow(unused_imports)]
 use std::net::UdpSocket;
 
@@ -14,12 +13,22 @@ fn main() {
             Ok((size, source)) => {
                 let request: DnsHeader = DnsHeader::parse(buf.to_vec().into_boxed_slice());
                 println!("Received request: {:?}", request);
-                let mut header: DnsHeader = DnsHeader::new();
-                header.id = request.id;
-                header.qr = true; // It's a response
+                let mut response_packet = DnsPacket::new();
+                response_packet.header.id = request.id;
+                response_packet.header.qr = true; // It's a response
+
+                response_packet.questions.push(DnsQuestion::new(
+                    "codecrafters.io".to_string(),
+                    1,
+                    1,
+                ));
+
+                response_packet.header.qdcount = response_packet.questions.len() as u16;
 
                 println!("Received {} bytes from {}", size, source);
-                let response = header.to_bytes();
+                let response = response_packet.to_bytes();
+
+                println!("Sending response: {:?}", response_packet);
                 udp_socket
                     .send_to(&response, source)
                     .expect("Failed to send response");
