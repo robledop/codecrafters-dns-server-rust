@@ -1,6 +1,6 @@
-mod dns_header;
+mod dns;
 
-use crate::dns_header::{DnsHeader, DnsPacket, DnsQuestion};
+use crate::dns::{DnsHeader, DnsPacket, DnsQuestion, DnsRecord, Qclass, Qtype};
 #[allow(unused_imports)]
 use std::net::UdpSocket;
 
@@ -19,18 +19,29 @@ fn main() {
 
                 response_packet.questions.push(DnsQuestion::new(
                     "codecrafters.io".to_string(),
-                    1,
-                    1,
+                    Qtype::A,
+                    Qclass::IN,
                 ));
 
                 response_packet.header.qdcount = response_packet.questions.len() as u16;
 
+                let rdata: [u8; 4] = [8, 8, 8, 8];
+                response_packet.answers.push(DnsRecord::new(
+                    "codecrafters.io".to_string(),
+                    Qtype::A,
+                    Qclass::IN,
+                    60,
+                    rdata.len() as u16,
+                    rdata.to_vec(),
+                ));
+
+                response_packet.header.ancount = response_packet.answers.len() as u16;
+
                 println!("Received {} bytes from {}", size, source);
-                let response = response_packet.to_bytes();
 
                 println!("Sending response: {:?}", response_packet);
                 udp_socket
-                    .send_to(&response, source)
+                    .send_to(&response_packet.to_bytes(), source)
                     .expect("Failed to send response");
             }
             Err(e) => {

@@ -1,3 +1,5 @@
+use std::net::TcpListener;
+
 #[derive(Debug, Default, Clone)]
 pub struct DnsHeader {
     // Packet ID (ID). 16 bits
@@ -89,12 +91,12 @@ impl DnsHeader {
 #[derive(Debug, Default, Clone)]
 pub struct DnsQuestion {
     pub qname: String,
-    pub qtype: u16,
-    pub qclass: u16,
+    pub qtype: Qtype,
+    pub qclass: Qclass,
 }
 
 impl DnsQuestion {
-    pub fn new(name: String, qtype: u16, qclass: u16) -> DnsQuestion {
+    pub fn new(name: String, qtype: Qtype, qclass: Qclass) -> DnsQuestion {
         DnsQuestion {
             qname: name,
             qtype,
@@ -109,9 +111,9 @@ impl DnsQuestion {
             bytes.extend(part.as_bytes());
         }
         bytes.push(0);
-        bytes.push((self.qtype >> 8) as u8);
+        bytes.push((self.qtype as u16 >> 8) as u8);
         bytes.push(self.qtype as u8);
-        bytes.push((self.qclass >> 8) as u8);
+        bytes.push((self.qclass as u16 >> 8) as u8);
         bytes.push(self.qclass as u8);
         bytes
     }
@@ -121,7 +123,7 @@ impl DnsQuestion {
 pub struct DnsPacket {
     pub header: DnsHeader,
     pub questions: Vec<DnsQuestion>,
-    // pub answers: Vec<DnsRecord>,
+    pub answers: Vec<DnsRecord>,
     // pub authorities: Vec<DnsRecord>,
     // pub additionals: Vec<DnsRecord>,
 }
@@ -131,6 +133,7 @@ impl DnsPacket {
         DnsPacket {
             header: DnsHeader::new(),
             questions: vec![],
+            answers: vec![],
         }
     }
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -139,6 +142,92 @@ impl DnsPacket {
         for question in &self.questions {
             bytes.extend(question.to_bytes());
         }
+        for answer in &self.answers {
+            bytes.extend(answer.to_bytes());
+        }
+        bytes
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Default, Copy, Clone)]
+#[repr(u16)]
+pub enum Qtype {
+    #[default]
+    A = 1, // host address
+    NS = 2,     // an authoritative name server
+    MD = 3,     // a mail destination (Obsolete - use MX)
+    MF = 4,     // a mail forwarder (Obsolete - use MX)
+    CNAME = 5,  // the canonical name for an alias
+    SOA = 6,    // marks the start of a zone of authority
+    MB = 7,     // a mailbox domain name (EXPERIMENTAL)
+    MG = 8,     // a mail group member (EXPERIMENTAL)
+    MR = 9,     // a mail rename domain name (EXPERIMENTAL)
+    NULL = 10,  // a null RR (EXPERIMENTAL)
+    WKS = 11,   // a well known service description
+    PTR = 12,   // a domain name pointer
+    HINFO = 13, // host information
+    MINFO = 14, // a mailbox or mail list information
+    MX = 15,    // mail exchange
+    TXT = 16,   // text strings
+                // There's more
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Default, Copy, Clone)]
+#[repr(u16)]
+pub enum Qclass {
+    #[default]
+    IN = 1, // the Internet
+    CS = 2,    // the CSNET class (Obsolete - used only for examples in some obsolete RFCs)
+    CH = 3,    // the CHAOS class
+    HS = 4,    // Hesiod [Dyer 87]
+    ANY = 255, // any class
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct DnsRecord {
+    pub qname: String,
+    pub qtype: Qtype,
+    pub qclass: Qclass,
+    pub ttl: u32,
+    pub rdlen: u16,
+    pub rdata: Vec<u8>,
+}
+
+impl DnsRecord {
+    pub fn new(
+        qname: String,
+        qtype: Qtype,
+        qclass: Qclass,
+        ttl: u32,
+        rdlen: u16,
+        rdata: Vec<u8>,
+    ) -> DnsRecord {
+        DnsRecord {
+            qname,
+            qtype,
+            qclass,
+            ttl,
+            rdlen,
+            rdata,
+        }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for part in self.qname.split('.') {
+            bytes.push(part.len() as u8);
+            bytes.extend(part.as_bytes());
+        }
+        bytes.push(0);
+        bytes.push((self.qtype as u16 >> 8) as u8);
+        bytes.push(self.qtype as u8);
+        bytes.push((self.qclass as u16 >> 8) as u8);
+        bytes.push(self.qclass as u8);
+        bytes.extend(self.ttl.to_be_bytes());
+        bytes.extend(self.rdlen.to_be_bytes());
+        bytes.extend(self.rdata.clone());
         bytes
     }
 }
