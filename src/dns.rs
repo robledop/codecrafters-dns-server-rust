@@ -1,4 +1,78 @@
-use std::net::TcpListener;
+#[allow(dead_code)]
+#[derive(Debug, Default, Copy, Clone)]
+#[repr(u16)]
+pub enum Qtype {
+    #[default]
+    A = 1, // host address
+    NS = 2,     // an authoritative name server
+    MD = 3,     // a mail destination (Obsolete - use MX)
+    MF = 4,     // a mail forwarder (Obsolete - use MX)
+    CNAME = 5,  // the canonical name for an alias
+    SOA = 6,    // marks the start of a zone of authority
+    MB = 7,     // a mailbox domain name (EXPERIMENTAL)
+    MG = 8,     // a mail group member (EXPERIMENTAL)
+    MR = 9,     // a mail rename domain name (EXPERIMENTAL)
+    NULL = 10,  // a null RR (EXPERIMENTAL)
+    WKS = 11,   // a well known service description
+    PTR = 12,   // a domain name pointer
+    HINFO = 13, // host information
+    MINFO = 14, // a mailbox or mail list information
+    MX = 15,    // mail exchange
+    TXT = 16,   // text strings
+    // There's more
+    ERROR = 256,
+}
+
+impl Qtype {
+    pub fn from(value: u16) -> Qtype {
+        match value {
+            1 => Qtype::A,
+            2 => Qtype::NS,
+            3 => Qtype::MD,
+            4 => Qtype::MF,
+            5 => Qtype::CNAME,
+            6 => Qtype::SOA,
+            7 => Qtype::MB,
+            8 => Qtype::MG,
+            9 => Qtype::MR,
+            10 => Qtype::NULL,
+            11 => Qtype::WKS,
+            12 => Qtype::PTR,
+            13 => Qtype::HINFO,
+            14 => Qtype::MINFO,
+            15 => Qtype::MX,
+            16 => Qtype::TXT,
+            _ => Qtype::ERROR,
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Default, Copy, Clone)]
+#[repr(u16)]
+pub enum Qclass {
+    #[default]
+    IN = 1, // the Internet
+    CS = 2,    // the CSNET class (Obsolete - used only for examples in some obsolete RFCs)
+    CH = 3,    // the CHAOS class
+    HS = 4,    // Hesiod [Dyer 87]
+    ANY = 255, // any class
+
+    ERROR = 256,
+}
+
+impl Qclass {
+    pub fn from(value: u16) -> Qclass {
+        match value {
+            1 => Qclass::IN,
+            2 => Qclass::CS,
+            3 => Qclass::CH,
+            4 => Qclass::HS,
+            255 => Qclass::ANY,
+            _ => Qclass::ERROR,
+        }
+    }
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct DnsHeader {
@@ -95,6 +169,24 @@ pub struct DnsQuestion {
     pub qclass: Qclass,
 }
 
+fn decode_domain_name(array: Box<[u8]>) -> (String, usize) {
+    let mut qname = String::new();
+    let mut i = 0;
+    while array[i] != 0 {
+        let len = array[i] as usize;
+        i += 1;
+        let part = &array[i..i + len];
+        qname += &String::from_utf8_lossy(part);
+        i += len;
+
+        if array[i] != 0 {
+            qname.push('.');
+        }
+    }
+
+    (qname, i as usize)
+}
+
 impl DnsQuestion {
     pub fn new(name: String, qtype: Qtype, qclass: Qclass) -> DnsQuestion {
         DnsQuestion {
@@ -102,6 +194,33 @@ impl DnsQuestion {
             qtype,
             qclass,
         }
+    }
+
+    pub fn parse(packet: Box<[u8]>, qdcount: u16) -> (Vec<DnsQuestion>, usize) {
+        let mut questions: Vec<DnsQuestion> = Vec::new();
+
+        let mut record_len: usize = 0;
+        for i in 0..qdcount {
+            let (qname, len) = decode_domain_name(
+                packet[i as usize + record_len..]
+                    .to_vec()
+                    .into_boxed_slice(),
+            );
+            let qtype = packet[i as usize + len + 2];
+            let qclass = packet[i as usize + len + 4];
+
+            println!("qname: {}, qtype: {}, qclass: {}", qname, qtype, qclass);
+
+            questions.push(DnsQuestion::new(
+                qname,
+                Qtype::from(qtype as u16),
+                Qclass::from(qclass as u16),
+            ));
+
+            record_len += len + 4; // to account for qtype and qclass
+        }
+
+        (questions, record_len)
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -136,6 +255,22 @@ impl DnsPacket {
             answers: vec![],
         }
     }
+
+    pub fn parse(packet: Box<[u8]>) -> DnsPacket {
+        let header = DnsHeader::parse(packet.clone());
+        let (questions, question_len) =
+            DnsQuestion::parse(packet[12..].to_vec().into_boxed_slice(), header.qdcount);
+        let answers = DnsRecord::parse(
+            packet[question_len..].to_vec().into_boxed_slice(),
+            header.ancount,
+        );
+        DnsPacket {
+            header,
+            questions,
+            answers,
+        }
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend(self.header.to_bytes());
@@ -147,42 +282,6 @@ impl DnsPacket {
         }
         bytes
     }
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Default, Copy, Clone)]
-#[repr(u16)]
-pub enum Qtype {
-    #[default]
-    A = 1, // host address
-    NS = 2,     // an authoritative name server
-    MD = 3,     // a mail destination (Obsolete - use MX)
-    MF = 4,     // a mail forwarder (Obsolete - use MX)
-    CNAME = 5,  // the canonical name for an alias
-    SOA = 6,    // marks the start of a zone of authority
-    MB = 7,     // a mailbox domain name (EXPERIMENTAL)
-    MG = 8,     // a mail group member (EXPERIMENTAL)
-    MR = 9,     // a mail rename domain name (EXPERIMENTAL)
-    NULL = 10,  // a null RR (EXPERIMENTAL)
-    WKS = 11,   // a well known service description
-    PTR = 12,   // a domain name pointer
-    HINFO = 13, // host information
-    MINFO = 14, // a mailbox or mail list information
-    MX = 15,    // mail exchange
-    TXT = 16,   // text strings
-                // There's more
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Default, Copy, Clone)]
-#[repr(u16)]
-pub enum Qclass {
-    #[default]
-    IN = 1, // the Internet
-    CS = 2,    // the CSNET class (Obsolete - used only for examples in some obsolete RFCs)
-    CH = 3,    // the CHAOS class
-    HS = 4,    // Hesiod [Dyer 87]
-    ANY = 255, // any class
 }
 
 #[derive(Debug, Default, Clone)]
@@ -212,6 +311,44 @@ impl DnsRecord {
             rdlen,
             rdata,
         }
+    }
+
+    pub fn parse(packet: Box<[u8]>, ancount: u16) -> Vec<DnsRecord> {
+        let mut answers: Vec<DnsRecord> = Vec::new();
+
+        let mut record_len: usize = 0;
+        for i in 0..ancount {
+            let (qname, len) = decode_domain_name(
+                packet[i as usize + record_len..]
+                    .to_vec()
+                    .into_boxed_slice(),
+            );
+
+            let qtype = packet[i as usize + len + 2];
+            let qclass = packet[i as usize + len + 4];
+            let ttl = packet[i as usize + len + 5] as u32;
+            let rdlen = packet[i as usize + len + 6] as u16;
+            let rdata =
+                packet[i as usize + len + 6..i as usize + len + 6 + rdlen as usize].to_vec();
+
+            println!(
+                "qtype: {}, qclass: {}, ttl: {}, rdlen: {}, rdata: {:?}",
+                qtype, qclass, ttl, rdlen, rdata
+            );
+
+            answers.push(DnsRecord::new(
+                qname,
+                Qtype::from(qtype as u16),
+                Qclass::from(qclass as u16),
+                ttl,
+                rdlen,
+                rdata,
+            ));
+
+            record_len += len + 4; // to account for qtype and qclass
+        }
+
+        answers
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
