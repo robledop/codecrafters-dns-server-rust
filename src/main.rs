@@ -16,7 +16,7 @@ fn main() {
                 println!("Received request: {:?}", request);
                 let mut header: DnsHeader = DnsHeader::new();
                 header.id = request.id;
-                header.qr = request.qr;
+                header.qr = true; // It's a response
 
                 println!("Received {} bytes from {}", size, source);
                 let response = header.to_bytes();
