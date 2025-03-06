@@ -6,19 +6,17 @@ use std::io::LineWriter;
 use std::net::UdpSocket;
 
 fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    // println!("Logs from your program will appear here!");
-
     let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
     let mut buf = [0; 512];
 
     loop {
         match udp_socket.recv_from(&mut buf) {
             Ok((size, source)) => {
-                // let request: DnsHeader = DnsHeader::parse(buf[..12] as [u8; 12]);
+                let request: DnsHeader = DnsHeader::parse(buf.to_vec().into_boxed_slice());
+                println!("Received request: {:?}", request);
                 let mut header: DnsHeader = DnsHeader::new();
-                header.id = 1234;
-                header.qr = true;
+                header.id = request.id;
+                header.qr = request.qr;
 
                 println!("Received {} bytes from {}", size, source);
                 let response = header.to_bytes();

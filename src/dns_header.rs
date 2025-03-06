@@ -46,7 +46,7 @@ impl DnsHeader {
             arcount: 0,
         }
     }
-    pub fn parse(packet: [u8; 12]) -> DnsHeader {
+    pub fn parse(packet: Box<[u8]>) -> DnsHeader {
         DnsHeader {
             id: ((packet[0] as u16) << 8) | packet[1] as u16,
             qr: packet[2] & 0b10000000 != 0,
