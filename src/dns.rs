@@ -20,7 +20,7 @@ pub enum Qtype {
     MX = 15,    // mail exchange
     TXT = 16,   // text strings
     // There's more
-    ERROR = 256,
+    ERROR = 256, // TODO: Use Result<T>
 }
 
 impl Qtype {
@@ -42,7 +42,7 @@ impl Qtype {
             14 => Qtype::MINFO,
             15 => Qtype::MX,
             16 => Qtype::TXT,
-            _ => Qtype::ERROR,
+            _ => Qtype::ERROR, // TODO: Use Result<T>
         }
     }
 }
