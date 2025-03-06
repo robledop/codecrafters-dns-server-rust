@@ -16,6 +16,12 @@ fn main() {
                 let mut response_packet = DnsPacket::new();
                 response_packet.header.id = request.id;
                 response_packet.header.qr = true; // It's a response
+                response_packet.header.opcode = request.opcode;
+                response_packet.header.rd = request.rd;
+
+                if request.opcode != 0 {
+                    response_packet.header.rcode = 4; // not implemented
+                }
 
                 response_packet.questions.push(DnsQuestion::new(
                     "codecrafters.io".to_string(),

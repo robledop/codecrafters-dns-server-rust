@@ -55,7 +55,7 @@ impl DnsHeader {
             opcode: (packet[2] & 0b01111000) >> 3,
             aa: packet[2] & 0b00000100 != 0,
             tc: packet[2] & 0b00001000 != 0,
-            rd: packet[2] & 0b00010000 != 0,
+            rd: packet[2] & 0b00000001 != 0,
             ra: packet[2] & 0b00100000 != 0,
             z: (packet[2] & 0b11000000) >> 6,
             rcode: packet[3] & 0b00001111,
