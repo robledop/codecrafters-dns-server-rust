@@ -5,7 +5,10 @@ use crate::dns::{DnsPacket, DnsQuestion, DnsRecord, Qclass, Qtype};
 use std::env;
 use std::net::{SocketAddr, UdpSocket};
 
+const HEADER_SIZE: usize = 12;
+
 fn main() {
+    env::set_var("RUST_BACKTRACE", "1");
     let args: Vec<String> = env::args().collect();
     dbg!(&args);
 
@@ -22,21 +25,19 @@ fn main() {
         i += 1;
     }
 
-    let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
-    let mut buf = [0; 512];
+    let udp_socket = UdpSocket::bind("0.0.0.0:2053").expect("Failed to bind to address");
+    let mut buf = [0; 20480];
 
     loop {
         match udp_socket.recv_from(&mut buf) {
             Ok((_, source)) => {
                 let request: DnsPacket = DnsPacket::parse(buf.to_vec().into_boxed_slice());
 
-                println!("Received RESPONSE: {:?}", request);
-
                 // It's a response
                 if request.header.qr {
                     println!("Received response from {:?}: {:?}", source, request.clone());
 
-                    let mut response = request.clone();
+                    let response = request.clone();
 
                     let request_index = request_queue
                         .iter()
@@ -47,10 +48,16 @@ fn main() {
                         request_queue.get(request_index).unwrap();
 
                     if original_request.header.qdcount > 1 {
+                        // The request has more than one question. We need to break it into
+                        // multiple queries and then combine the responses from the forwarder
+                        // into a single response back to the client
+
                         let response_index = response_queue
                             .iter()
                             .position(|x| x.0 == original_request.header.id);
 
+                        // If the index is some, that means we already received at least one response
+                        // from the forwarder, and now we need to combine the responses
                         if response_index.is_some() {
                             let (_, address, existing_response) =
                                 response_queue.get(response_index.unwrap()).unwrap();
@@ -68,6 +75,7 @@ fn main() {
                                     "Sending COMBINED response to {:?}: {:?}",
                                     address, existing_response
                                 );
+
                                 udp_socket
                                     .send_to(&existing_response.to_bytes(), address)
                                     .expect("Failed to send response");
@@ -84,8 +92,6 @@ fn main() {
                         }
                     } else {
                         println!("Sending response to {:?}: {:?}", client_address, response);
-                        println!("response_queue: {:?}", response_queue);
-                        println!("request_queue: {:?}", request_queue);
 
                         udp_socket
                             .send_to(&response.to_bytes(), client_address)
@@ -101,13 +107,11 @@ fn main() {
                         request_queue.remove(request_index);
                     }
                 } else {
-                    request_queue.push((request.header.id, source, request.clone()));
-                    // It's a query
                     println!("Received query from {:?}: {:?}", source, request.clone());
 
-                    if request.header.qdcount > 1 {
-                        println!("Received a query with multiple questions. They will be broken down into multiple queries.");
+                    request_queue.push((request.header.id, source, request.clone()));
 
+                    if request.header.qdcount > 1 {
                         for question in request.questions.iter() {
                             let mut forwarded_request = request.clone();
                             forwarded_request.header.qdcount = 1;

@@ -1,3 +1,4 @@
+use crate::HEADER_SIZE;
 
 #[allow(dead_code)]
 #[derive(Debug, Default, Copy, Clone)]
@@ -154,7 +155,6 @@ pub struct DnsQuestion {
     pub qclass: Qclass,
 }
 
-
 fn decode_domain_name(array: Box<[u8]>) -> (String, usize, usize) {
     let mut qname = String::new();
     let mut i = 0;
@@ -164,10 +164,7 @@ fn decode_domain_name(array: Box<[u8]>) -> (String, usize, usize) {
         let is_pointer = (len & 0b11000000) == 0b11000000;
 
         if is_pointer {
-            println!("IT'S A POINTER");
-
             offset = ((len & 0b00111111) as usize) << 8 | array[i + 1] as usize;
-            println!("Offset: {}", offset);
 
             i += 2;
         } else {
@@ -205,7 +202,7 @@ impl DnsQuestion {
             // We have a compressed label
             if offset > 0 {
                 let (compressed_label, _, _) =
-                    decode_domain_name(packet[offset - 12..].to_vec().into_boxed_slice());
+                    decode_domain_name(packet[offset - HEADER_SIZE..].to_vec().into_boxed_slice());
                 qname += &compressed_label;
                 qname_len -= 1;
             }
@@ -254,10 +251,10 @@ impl DnsPacket {
         let mut header = DnsHeader::parse(packet.clone());
 
         let (questions, question_len) =
-            DnsQuestion::parse(packet[12..].to_vec().into_boxed_slice(), header.qdcount);
+            DnsQuestion::parse(packet[HEADER_SIZE..].to_vec().into_boxed_slice(), header.qdcount);
 
         let answers = DnsRecord::parse(
-            packet[question_len + 12..].to_vec().into_boxed_slice(),
+            packet[question_len + HEADER_SIZE..].to_vec().into_boxed_slice(),
             header.ancount,
         );
 
