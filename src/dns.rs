@@ -1,3 +1,4 @@
+
 #[allow(dead_code)]
 #[derive(Debug, Default, Copy, Clone)]
 #[repr(u16)]
@@ -74,11 +75,12 @@ impl Qclass {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct DnsHeader {
     // Packet ID (ID). 16 bits
     pub id: u16,
     // Query/Response indicator (QR). 1 bit
+    // 1 = response, 0 = query
     pub qr: bool,
     // Operation code (OPCODE). 4 bits
     pub opcode: u8,
@@ -105,23 +107,6 @@ pub struct DnsHeader {
 }
 
 impl DnsHeader {
-    pub fn new() -> DnsHeader {
-        DnsHeader {
-            id: 0,
-            qr: false,
-            opcode: 0,
-            aa: false,
-            tc: false,
-            rd: false,
-            ra: false,
-            z: 0,
-            rcode: 0,
-            qdcount: 0,
-            ancount: 0,
-            nscount: 0,
-            arcount: 0,
-        }
-    }
     pub fn parse(packet: Box<[u8]>) -> DnsHeader {
         DnsHeader {
             id: ((packet[0] as u16) << 8) | packet[1] as u16,
@@ -169,22 +154,35 @@ pub struct DnsQuestion {
     pub qclass: Qclass,
 }
 
-fn decode_domain_name(array: Box<[u8]>) -> (String, usize) {
+
+fn decode_domain_name(array: Box<[u8]>) -> (String, usize, usize) {
     let mut qname = String::new();
     let mut i = 0;
+    let mut offset = 0;
     while array[i] != 0 {
-        let len = array[i] as usize;
-        i += 1;
-        let part = &array[i..i + len];
-        qname += &String::from_utf8_lossy(part);
-        i += len;
+        let len = array[i];
+        let is_pointer = (len & 0b11000000) == 0b11000000;
+
+        if is_pointer {
+            println!("IT'S A POINTER");
+
+            offset = ((len & 0b00111111) as usize) << 8 | array[i + 1] as usize;
+            println!("Offset: {}", offset);
+
+            i += 2;
+        } else {
+            i += 1;
+            let part = &array[i..i + len as usize];
+            qname += &String::from_utf8_lossy(part);
+            i += len as usize;
+        }
 
         if array[i] != 0 {
-            qname.push('.');
+            qname += ".";
         }
     }
 
-    (qname, i as usize)
+    (qname, i + 1, offset)
 }
 
 impl DnsQuestion {
@@ -199,28 +197,34 @@ impl DnsQuestion {
     pub fn parse(packet: Box<[u8]>, qdcount: u16) -> (Vec<DnsQuestion>, usize) {
         let mut questions: Vec<DnsQuestion> = Vec::new();
 
-        let mut record_len: usize = 0;
-        for i in 0..qdcount {
-            let (qname, len) = decode_domain_name(
-                packet[i as usize + record_len..]
-                    .to_vec()
-                    .into_boxed_slice(),
-            );
-            let qtype = packet[i as usize + len + 2];
-            let qclass = packet[i as usize + len + 4];
+        let mut questions_len: usize = 0;
+        for _ in 0..qdcount {
+            let (mut qname, mut qname_len, offset) =
+                decode_domain_name(packet[questions_len..].to_vec().into_boxed_slice());
 
-            println!("qname: {}, qtype: {}, qclass: {}", qname, qtype, qclass);
+            // We have a compressed label
+            if offset > 0 {
+                let (compressed_label, _, _) =
+                    decode_domain_name(packet[offset - 12..].to_vec().into_boxed_slice());
+                qname += &compressed_label;
+                qname_len -= 1;
+            }
+
+            let qtype = ((packet[questions_len + qname_len] as u16) << 8)
+                | (packet[questions_len + qname_len + 1] as u16);
+            let qclass = ((packet[questions_len + qname_len + 2] as u16) << 8)
+                | (packet[questions_len + qname_len + 3] as u16);
 
             questions.push(DnsQuestion::new(
                 qname,
-                Qtype::from(qtype as u16),
-                Qclass::from(qclass as u16),
+                Qtype::from(qtype),
+                Qclass::from(qclass),
             ));
 
-            record_len += len + 4; // to account for qtype and qclass
+            questions_len += qname_len + 4; // to account for qtype and qclass
         }
 
-        (questions, record_len)
+        (questions, questions_len)
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -243,27 +247,23 @@ pub struct DnsPacket {
     pub header: DnsHeader,
     pub questions: Vec<DnsQuestion>,
     pub answers: Vec<DnsRecord>,
-    // pub authorities: Vec<DnsRecord>,
-    // pub additionals: Vec<DnsRecord>,
 }
 
 impl DnsPacket {
-    pub fn new() -> DnsPacket {
-        DnsPacket {
-            header: DnsHeader::new(),
-            questions: vec![],
-            answers: vec![],
-        }
-    }
-
     pub fn parse(packet: Box<[u8]>) -> DnsPacket {
-        let header = DnsHeader::parse(packet.clone());
+        let mut header = DnsHeader::parse(packet.clone());
+
         let (questions, question_len) =
             DnsQuestion::parse(packet[12..].to_vec().into_boxed_slice(), header.qdcount);
+
         let answers = DnsRecord::parse(
-            packet[question_len..].to_vec().into_boxed_slice(),
+            packet[question_len + 12..].to_vec().into_boxed_slice(),
             header.ancount,
         );
+
+        header.qdcount = questions.len() as u16;
+        header.ancount = answers.len() as u16;
+
         DnsPacket {
             header,
             questions,
@@ -314,41 +314,43 @@ impl DnsRecord {
     }
 
     pub fn parse(packet: Box<[u8]>, ancount: u16) -> Vec<DnsRecord> {
-        let mut answers: Vec<DnsRecord> = Vec::new();
+        let mut records: Vec<DnsRecord> = Vec::new();
 
         let mut record_len: usize = 0;
         for i in 0..ancount {
-            let (qname, len) = decode_domain_name(
-                packet[i as usize + record_len..]
-                    .to_vec()
-                    .into_boxed_slice(),
-            );
+            let (qname, len, _) =
+                decode_domain_name(packet[record_len..].to_vec().into_boxed_slice());
 
-            let qtype = packet[i as usize + len + 2];
-            let qclass = packet[i as usize + len + 4];
-            let ttl = packet[i as usize + len + 5] as u32;
-            let rdlen = packet[i as usize + len + 6] as u16;
+            let qtype =
+                ((packet[record_len + len] as u16) << 8) | (packet[record_len + len + 1] as u16);
+
+            let qclass = ((packet[record_len + len + 2] as u16) << 8)
+                | (packet[record_len + len + 3] as u16);
+
+            let ttl = (packet[record_len + len + 4] as u32) << 24
+                | (packet[record_len + len + 5] as u32) << 16
+                | (packet[record_len + len + 6] as u32) << 8
+                | packet[record_len + len + 7] as u32;
+
+            let rdlen =
+                (packet[record_len + len + 8] as u16) << 8 | packet[record_len + len + 9] as u16;
+
             let rdata =
-                packet[i as usize + len + 6..i as usize + len + 6 + rdlen as usize].to_vec();
+                packet[record_len + len + 10..record_len + len + 10 + rdlen as usize].to_vec();
 
-            println!(
-                "qtype: {}, qclass: {}, ttl: {}, rdlen: {}, rdata: {:?}",
-                qtype, qclass, ttl, rdlen, rdata
-            );
-
-            answers.push(DnsRecord::new(
+            records.push(DnsRecord::new(
                 qname,
-                Qtype::from(qtype as u16),
-                Qclass::from(qclass as u16),
+                Qtype::from(qtype),
+                Qclass::from(qclass),
                 ttl,
                 rdlen,
                 rdata,
             ));
 
-            record_len += len + 4; // to account for qtype and qclass
+            record_len += i as usize + len + 10 + rdlen as usize; // to account for qtype and qclass
         }
 
-        answers
+        records
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
